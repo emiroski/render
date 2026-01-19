@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Küp Arena - Render Edition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #ui {
+            position: fixed; top: 20px; left: 20px;
+            background: rgba(0, 0, 0, 0.8); color: #00ff00;
+            padding: 15px; border-radius: 8px; border: 1px solid #00ff00;
+            pointer-events: none; text-transform: uppercase; letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <b>Kontroller:</b><br>
+    W - S : İleri / Geri<br>
+    A - D : Sağa / Sola Dön
+</div>
+
+<script>
+    // RENDER LİNKİNİ BURAYA YAPIŞTIRACAKSIN
+    const socket = io('https://SENİN-RENDER-LİNKİN.onrender.com', { 
+        transports: ['websocket'] 
+    });
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050505);
+    
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Işıklandırma ve Zemin
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambientLight);
+    const grid = new THREE.GridHelper(200, 40, 0x00ff00, 0x222222);
+    scene.add(grid);
+
+    const players = {};
+    const keys = {};
+    let myMesh;
+
+    function createCube(data) {
+        const geometry = new THREE.BoxGeometry(2, 2, 2);
+        const material = new THREE.MeshStandardMaterial({ color: data.color });
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.set(data.x, data.y, data.z);
+        scene.add(cube);
+        return cube;
+    }
+
+    // Soket Olayları
+    socket.on('currentPlayers', (data) => {
+        Object.keys(data).forEach(id => {
+            players[id] = createCube(data[id]);
+            if(id === socket.id) myMesh = players[id];
+        });
+    });
+
+    socket.on('newPlayer', (data) => { players[data.id] = createCube(data); });
+
+    socket.on('playerMoved', (data) => {
+        if(players[data.id]) {
+            players[data.id].position.set(data.x, data.y, data.z);
+            players[data.id].rotation.y = data.ry;
+        }
+    });
+
+    socket.on('playerDisconnected', (id) => {
+        if(players[id]) { scene.remove(players[id]); delete players[id]; }
+    });
+
+    // Giriş Kontrolleri
+    window.addEventListener('keydown', e => keys[e.code] = true);
+    window.addEventListener('keyup', e => keys[e.code] = false);
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        if(myMesh) {
+            const moveSpeed = 0.3;
+            const rotateSpeed = 0.06;
+
+            // A-D ile Dönüş
+            if(keys['KeyA']) myMesh.rotation.y += rotateSpeed;
+            if(keys['KeyD']) myMesh.rotation.y -= rotateSpeed;
+
+            // W-S ile Hareket
+            if(keys['KeyW']) {
+                myMesh.position.x += Math.sin(myMesh.rotation.y) * moveSpeed;
+                myMesh.position.z += Math.cos(myMesh.rotation.y) * moveSpeed;
+            }
+            if(keys['KeyS']) {
+                myMesh.position.x -= Math.sin(myMesh.rotation.y) * moveSpeed;
+                myMesh.position.z -= Math.cos(myMesh.rotation.y) * moveSpeed;
+            }
+
+            // Pozisyonu Sunucuya Bildir
+            socket.emit('playerMovement', { 
+                x: myMesh.position.x, 
+                y: 1, 
+                z: myMesh.position.z, 
+                ry: myMesh.rotation.y 
+            });
+
+            // Akıllı Kamera Takibi
+            const offset = new THREE.Vector3(0, 7, -15);
+            const actualOffset = offset.applyMatrix4(myMesh.matrixWorld);
+            camera.position.lerp(actualOffset, 0.1); // Yumuşak kamera geçişi
+            camera.lookAt(myMesh.position);
+        }
+
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    window.onresize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+</script>
+</body>
+</html>
